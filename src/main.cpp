@@ -868,13 +868,16 @@ static std::vector<std::string> tabCandidates;
 static size_t tabCandidateIdx = 0;
 
 static void handleTab() {
-    // Tab only completes the bare function/command name -- once "(" has
-    // been typed (e.g. mid-way through "timeset(9,"), there's nothing
-    // left to complete.
-    if (!entering || isIdentifierEntry() == false) return;
-    if (entryBuf.find('(') != std::string::npos) return;
+    if (!entering || !isIdentifierEntry()) return;
 
     if (!tabActive) {
+        // Starting a fresh scan: only completes the bare function/command
+        // name -- once "(" has been typed by hand (e.g. mid-way through
+        // "timeset(9,"), there's nothing left to complete. This check must
+        // only apply here, not while already cycling (see below), since
+        // candidates like "sto" auto-append their own "(" and would
+        // otherwise wrongly look like "past the name" on the next Tab.
+        if (entryBuf.find('(') != std::string::npos) return;
         std::vector<std::string> matches;
         for (auto& name : FUNCTION_NAMES) {
             if (name.size() >= entryBuf.size() && name.compare(0, entryBuf.size(), entryBuf) == 0) {
