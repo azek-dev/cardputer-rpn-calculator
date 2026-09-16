@@ -1083,12 +1083,17 @@ void loop() {
                 return;
             }
 
-            if (status.tab) {
-                handleTab();
-                render();
-                return;
-            }
-            tabActive = false; // any other key ends a completion cycle
+            // A single keyboard scan can report several logical keys at
+            // once (e.g. the last letter of a word and Enter/Tab/Backspace,
+            // when typing fast enough that both are physically down in the
+            // same scan tick -- see Keyboard.cpp's updateKeysState()). The
+            // fn/opt combos below are deliberately-held modifier chords
+            // that can't realistically coincide with unrelated ordinary
+            // typing, so they're handled exclusively. Everything else
+            // (plain characters, Tab, Backspace, Enter) is handled without
+            // early returns, in a fixed order, so a fast keystroke bundled
+            // with one of those never gets silently dropped.
+            if (!status.tab) tabActive = false; // any non-Tab key ends a completion cycle
 
             if (status.fn && status.del) {
                 clearAll();
@@ -1107,10 +1112,6 @@ void loop() {
             } else if (optD) {
                 degMode = !degMode;
                 saveStateToFlash();
-            } else if (status.del) {
-                handleBackspace();
-            } else if (status.enter) {
-                onEnter();
             } else {
                 for (char c : status.word) {
                     if (c == '+') { doBinary(f_add); }
@@ -1122,6 +1123,9 @@ void loop() {
                     else if (c == '!') { doUnary(factorial); }
                     else { handleChar(c); }
                 }
+                if (status.tab) handleTab();
+                if (status.del) handleBackspace();
+                else if (status.enter) onEnter();
             }
             render();
         }
