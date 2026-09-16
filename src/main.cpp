@@ -841,16 +841,22 @@ static void cursorRight() { if (entering && cursorPos < entryBuf.size()) cursorP
 // sto/rcl, which are the only ones that need a typed argument right after
 // the name (everything else, math functions included, takes its arguments
 // from the stack, not from parentheses).
+//
+// Order matters here, not just for readability: it's the order repeated
+// Tab presses cycle through for a shared prefix. Math functions (used
+// constantly during a calculation) are listed before the utility commands
+// (typed rarely), so e.g. "s"+Tab lands on "sin" before "save"/"sleeptime"/
+// "sto".
 static const std::vector<std::string> FUNCTION_NAMES = {
     "pi", "e", "rand", "randint",
-    "help", "save", "time", "timeset", "date", "dateset",
-    "usbdrive", "usbdebug", "sleeptime", "wifi", "battery", "uptime",
-    "sto", "rcl",
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "tanh", "sinh", "cosh", "asinh", "acosh", "atanh",
     "sqrt", "cbrt", "inv", "sq", "pow", "exp", "log", "ln", "log2",
     "abs", "floor", "ceil", "round", "int", "fact",
     "mod", "min", "max", "clamp", "gcd", "lcm", "ncr", "npr",
+    "sto", "rcl",
+    "help", "save", "time", "timeset", "date", "dateset",
+    "usbdrive", "usbdebug", "sleeptime", "wifi", "battery", "uptime",
 };
 
 static bool isBareWord(const std::string& w) {
