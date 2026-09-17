@@ -22,8 +22,9 @@ HP電卓のような X/Y/Z/T の4段スタックを常時画面に表示し、�
   ([cardputer-common](https://github.com/azek-dev/cardputer-common) 共有ライブラリを使用)
 - `help` コマンドで画面上のキー・関数リファレンスを表示
 
-詳しいキー操作・関数一覧は [MANUAL.ja.md](MANUAL.ja.md)、[src/main.cpp](src/main.cpp) 冒頭の
-コメント、または実機上で `help` と入力してEnterを押すと確認できます。
+詳しいキー操作・関数一覧は [MANUAL.ja.md](MANUAL.ja.md)([English](MANUAL.md))、
+[src/main.cpp](src/main.cpp) 冒頭のコメント、または実機上で `help` と入力してEnterを
+押すと確認できます。
 
 ## ビルド・書き込み
 

@@ -1,5 +1,7 @@
 # マニュアル (日本語版)
 
+*[English version here](MANUAL.md)*
+
 M5Stack Cardputer ADV向けRPN(逆ポーランド記法)電卓の使い方です。HP電卓と同じ
 X/Y/Z/Tの4段スタックが常時画面に表示され、そこに数値を積み(push)、関数や演算子で
 変形していく操作モデルです。代数式(`2*sin(pi/4)`のような通常の数式)をそのまま
