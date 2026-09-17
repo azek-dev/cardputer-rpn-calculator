@@ -39,7 +39,7 @@ the essence of RPN.
 
 | Key | Action |
 |---|---|
-| digits / `.` | Append to X's entry buffer (bottom line) |
+| a number, decimal point included | Append to X's entry buffer (bottom line), one character at a time -- nothing is computed yet |
 | `Enter` | Push the number being typed onto the stack (X→Y→Z→T shift) |
 | `Enter` with nothing typed | Duplicate X into Y (the classic "ENTER ENTER" trick, e.g. for squaring) |
 | `opt` + `-` (CHS) | Flip the sign of the number being typed, or of X itself |

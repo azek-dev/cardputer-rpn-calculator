@@ -3,7 +3,8 @@
 // that is always visible on screen (not a typed-expression text buffer).
 //
 // Entering numbers:
-//   Type digits/. then press Enter to push the number onto the stack
+//   Type a number (digits, with an optional decimal point) then press
+//   Enter to push it onto the stack
 //   (X moves to Y, Y to Z, Z to T -- the old T is dropped). Pressing Enter
 //   on an empty line duplicates X into Y (classic RPN "ENTER" behavior),
 //   so "5 Enter Enter *" squares 5. There's no "-" key for negative
