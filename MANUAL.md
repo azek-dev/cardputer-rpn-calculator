@@ -54,6 +54,26 @@ type the positive value first, then flip its sign with `opt+-` (CHS).
 5 opt+- Enter   ->  pushes -5 onto the stack
 ```
 
+## Scientific notation
+
+While typing a number, press `e` to switch to the exponent part -- it's
+just another character in the number, the same as `.`.
+
+```
+6 . 0 2 2 e 2 3 Enter   =>  pushes 6.022e23
+```
+
+For a **negative exponent**, a `-` typed right after `e` is the exponent's
+sign, not subtraction:
+
+```
+1 e - 6 Enter   =>  pushes 1e-6 (0.000001)
+```
+
+Once `e` has been typed, `opt+-` (CHS) flips the **exponent's** sign
+instead of the mantissa's (before `e` is typed, it still flips the
+mantissa's sign as usual).
+
 ## Operators (apply immediately, no Enter needed)
 
 | Key | Action |
