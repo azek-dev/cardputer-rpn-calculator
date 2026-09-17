@@ -11,7 +11,10 @@
 //   numbers (that's always subtract, see below, as on a real RPN
 //   calculator) -- press opt+- (CHS) to flip the sign of the number being
 //   typed, or of X itself when nothing is being typed, e.g. "5 opt+- Enter"
-//   pushes -5.
+//   pushes -5. Scientific notation works too: type "e" mid-number to add
+//   an exponent (e.g. "6.022e23"); "-" right after the "e" makes the
+//   exponent negative ("1e-6"), and opt+- also toggles the exponent's
+//   sign (rather than the mantissa's) once an "e" is present.
 //
 // Operators (+ - * / ^ % !) apply immediately, no Enter needed:
 //   + - * / ^ %   pop Y and X, push f(Y,X) (e.g. Y^X for ^, Y mod X for %)
@@ -153,8 +156,9 @@ static size_t cursorPos = 0;         // edit cursor within entryBuf
 static bool helpMode = false;
 static int helpPage = 0;
 static const std::vector<std::vector<std::string>> helpPages = {
-    {"Entering numbers:", "digits/./- then Enter", "pushes onto the stack.", "Enter on blank line", "duplicates X.", "opt+- (CHS) = sign"},
+    {"Entering numbers:", "digits/. then Enter", "pushes onto the stack.", "Enter on blank line", "duplicates X.", "opt+- (CHS) = sign"},
     {"Operators (no Enter", "needed):", "+ - * / ^ %  pop Y,X", "push f(Y,X)", "!  factorial of X"},
+    {"Scientific notation:", "6.022 e 23 Enter", "  = 6.022e23", "1 e - 6 Enter", "  = 1e-6 ('-' after e", "   is the exponent sign)"},
     {"Trig & hyperbolic", "(type name + Enter):", "sin cos tan atan2", "(opt+D toggles deg/rad)", "sinh cosh tanh", "asinh acosh atanh"},
     {"Power/log & compare:", "sqrt cbrt inv sq pow", "log ln log2 exp", "min max gcd lcm", "mod clamp"},
     {"Combinatorics & round:", "ncr npr rand randint", "abs floor ceil round", "int  pi  e"},
@@ -792,9 +796,15 @@ static void handleChar(char c) {
 // opt+- (CHS) instead. This just finalizes any pending entry (if any)
 // and then pops Y,X and pushes Y-X. The one exception is while typing a
 // command's text argument (e.g. wifi(my-ssid,pass)), where '-' is just a
-// literal character of the SSID/password.
+// literal character of the SSID/password. A '-' immediately after an "e"/
+// "E" (scientific notation, e.g. typing "6.022e-23") is also literal --
+// it's the exponent's sign, not an operator.
 static void handleMinusKey() {
     if (isIdentifierEntry()) { handleChar('-'); return; }
+    if (entering && cursorPos > 0 && (entryBuf[cursorPos - 1] == 'e' || entryBuf[cursorPos - 1] == 'E')) {
+        handleChar('-');
+        return;
+    }
     doBinary(f_sub);
 }
 
@@ -817,17 +827,21 @@ static void handleBackspace() {
     stackLiftEnabled = false;
 }
 
-// opt+- : change sign (CHS)
+// opt+- : change sign (CHS). If the entry contains a scientific-notation
+// "e"/"E" (e.g. "6.022e23"), this toggles the *exponent's* sign, right
+// after the "e" -- otherwise it toggles the mantissa's leading sign, as
+// before.
 static void handleChs() {
     if (entering) {
         if (isIdentifierEntry()) return; // no sign concept for a function name
-        if (!entryBuf.empty() && entryBuf[0] == '-') {
-            entryBuf.erase(entryBuf.begin());
-            if (cursorPos > 0) cursorPos--;
+        size_t epos = entryBuf.find_first_of("eE");
+        size_t signPos = (epos != std::string::npos) ? epos + 1 : 0;
+        if (signPos < entryBuf.size() && entryBuf[signPos] == '-') {
+            entryBuf.erase(entryBuf.begin() + signPos);
         } else {
-            entryBuf.insert(entryBuf.begin(), '-');
-            cursorPos++;
+            entryBuf.insert(entryBuf.begin() + signPos, '-');
         }
+        cursorPos = entryBuf.size();
         return;
     }
     regX = -regX;
