@@ -24,7 +24,8 @@ HP電卓のような X/Y/Z/T の4段スタックを常時画面に表示し、�
 
 詳しいキー操作・関数一覧は [MANUAL.ja.md](MANUAL.ja.md)([English](MANUAL.md))、
 [src/main.cpp](src/main.cpp) 冒頭のコメント、または実機上で `help` と入力してEnterを
-押すと確認できます。
+押すと確認できます。実用的な公式を使った入力練習例は [PRACTICE.ja.md](PRACTICE.ja.md)
+にまとめています。
 
 ## ビルド・書き込み
 
