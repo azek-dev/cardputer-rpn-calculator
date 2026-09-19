@@ -161,6 +161,43 @@ rcl(0)             ->  recalls that 5 back onto the stack
 Memory registers are auto-saved to internal flash too, and survive power
 loss.
 
+## Complex numbers and polar coordinates (for AC circuit math)
+
+There's no full "complex mode" like a real HP calculator (where every
+register secretly carries a real and imaginary part). Instead, this uses a
+lightweight convention: **two ordinary registers, read together, are one
+complex number**.
+
+- A single complex number: **Y=real, X=imaginary** (rectangular), or
+  **Y=magnitude, X=angle** (polar)
+- Two complex numbers span the whole stack: whichever was entered first
+  ends up in **T,Z**, the one entered second in **Y,X**
+
+| Function | Description | In/out |
+|---|---|---|
+| `r2p` | Rectangular to polar | 2-in (Y=x,X=y) -> 2-out (Y=r,X=theta); theta follows DEG/RAD |
+| `p2r` | Polar to rectangular | 2-in (Y=r,X=theta) -> 2-out (Y=x,X=y) |
+| `cadd`/`csub`/`cmul`/`cdiv` | Complex arithmetic | 4-in ((T,Z)=A, (Y,X)=B, each (real,imag)) -> 2-out (Y,X) = A op B |
+
+**AC circuit example**: series combination of Z1=3+j4 ohm and Z2=1+j2 ohm
+(add directly in rectangular form):
+
+```
+3 Enter -> 4 Enter -> 1 Enter -> 2 Enter -> cadd Enter
+```
+
+Result: Y=4 (real), X=6 (imaginary) -- a combined impedance of 4+j6 ohm.
+
+For multiplying/dividing magnitude-and-phase values (parallel combinations,
+gain calculations), convert to polar with `r2p` first, then use
+`cmul`/`cdiv`.
+
+**About vectors**: a 2D vector's magnitude and angle are exactly what `r2p`
+already gives you (magnitude=r, angle=theta). Operations that need 3+
+values at once (dot/cross products) don't fit in the 4-level stack, so use
+the memory registers (`sto`/`rcl`) as scratch space, the same way a real HP
+calculator would.
+
 ## DEG / RAD toggle
 
 `opt` + `D` toggles the angle unit for every trig function (`sin cos tan
