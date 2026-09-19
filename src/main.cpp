@@ -37,6 +37,18 @@
 //   sto(n)   store X into register n (X is left unchanged)
 //   rcl(n)   push register n onto the stack, like typing a new number
 //
+// Complex numbers and polar coordinates (a lightweight convention, not a
+// true complex-number stack mode): a single complex number is just two
+// ordinary registers read together as (real=Y, imag=X), or (mag=Y,
+// angle=X) for polar. Two complex numbers span the whole stack: the one
+// entered first ends up "underneath", in (T,Z); the one entered second is
+// "on top", in (Y,X).
+//   r2p   2-in (Y=x,X=y) -> 2-out (Y=r,X=theta), theta uses DEG/RAD
+//   p2r   2-in (Y=r,X=theta) -> 2-out (Y=x,X=y), the reverse
+//   cadd/csub/cmul/cdiv   4-in (T,Z)=A, (Y,X)=B, each (real,imag) ->
+//     2-out (Y,X) = A op B (e.g. impedance math: series = cadd on
+//     rectangular form, series/parallel angle work = cmul/cdiv on polar)
+//
 // Keys:
 //   Enter        push the typed number, or apply the typed function name
 //   Backspace    delete last character while typing; CLX (clear X) if not
@@ -163,6 +175,7 @@ static const std::vector<std::vector<std::string>> helpPages = {
     {"Power/log & compare:", "sqrt cbrt inv sq pow", "log ln log2 exp", "min max gcd lcm", "mod clamp"},
     {"Combinatorics & round:", "ncr npr rand randint", "abs floor ceil round", "int  pi  e"},
     {"Memory registers 0-9:", "sto(n) stores X into", "  register n (X unchanged)", "rcl(n) pushes register n", "ex: 5 Enter sto(0)"},
+    {"Complex/polar (2 regs =", " one complex number):", "r2p (Y=x,X=y)->(Y=r,X=t)", "p2r is the reverse", "cadd/csub/cmul/cdiv:", "  (T,Z)=A (Y,X)=B ->(Y,X)"},
     {"Stack keys:", "fn+; roll up (Rup)", "fn+. roll down (Rdn)", "fn+S swap X<->Y", "fn+Bksp clear all"},
     {"Saving:", "Stack auto-saves to", "flash (survives power", "off). save+Enter also", "appends to rpn_log.txt", "on a microSD card."},
     {"Clock (no RTC on this", "board, resets each boot):", "timeset(H,M,S) / time", "dateset(Y,M,D) / date", "ex: timeset(9,30,0)"},
@@ -441,6 +454,47 @@ static void doTernary(double (*f)(double, double, double)) {
     stackLiftEnabled = true;
 }
 
+// Places a 2-value result into Y,X. Used by rect/polar conversion (2-in)
+// and the complex-pair arithmetic below (4-in) -- both leave a single
+// "complex number" (Y,X) on top afterward, per the lightweight convention
+// documented at the top of this file: no true complex-number stack mode,
+// just two ordinary registers read together.
+static void dropAndPush2(int consumed, double y, double x) {
+    regY = y;
+    regX = x;
+    if (consumed >= 4) regZ = regT; // consumed == 2 leaves Z,T untouched
+}
+
+// 2-in (Y,X), 2-out (Y,X): rectangular/polar conversion.
+static void doConvert2(void (*f)(double, double, double&, double&)) {
+    if (!finalizeEntryForOperation()) return;
+    try {
+        double r1, r2;
+        f(regY, regX, r1, r2);
+        dropAndPush2(2, r1, r2);
+        resultLine.clear();
+    } catch (const std::exception& ex) {
+        resultLine = std::string("ERR: ") + ex.what();
+    }
+    stackLiftEnabled = true;
+}
+
+// 4-in (T,Z,Y,X read as two complex numbers, (T,Z)=A entered first,
+// (Y,X)=B entered second, each as (real,imag)), 2-out (Y,X) = the
+// complex result.
+static void doComplexBinary(void (*f)(double, double, double, double, double&, double&)) {
+    if (!finalizeEntryForOperation()) return;
+    try {
+        double r1, r2;
+        f(regT, regZ, regY, regX, r1, r2);
+        dropAndPush2(4, r1, r2);
+        resultLine.clear();
+    } catch (const std::exception& ex) {
+        resultLine = std::string("ERR: ") + ex.what();
+    }
+    stackLiftEnabled = true;
+}
+
 // ---------------------------------------------------------------------
 // Named function/command dispatch (invoked on Enter for an identifier
 // entry). Math functions transform the stack; utility commands (help,
@@ -486,6 +540,37 @@ static double f_randint(double lo_, double hi_) {
     long long r = lo + (long long)(randomUnit() * (double)range);
     if (r > hi) r = hi;
     return (double)r;
+}
+
+// Rectangular/polar conversion (2-in, 2-out; DEG/RAD-aware) and lightweight
+// complex-pair arithmetic (4-in, 2-out) -- see the "Complex numbers and
+// polar coordinates" note near the top of this file for the convention.
+static void f_r2p(double x, double y, double& r, double& theta) {
+    r = std::sqrt(x * x + y * y);
+    theta = fromRad(std::atan2(y, x));
+}
+static void f_p2r(double r, double theta, double& x, double& y) {
+    double rad = toRad(theta);
+    x = r * std::cos(rad);
+    y = r * std::sin(rad);
+}
+static void f_cadd(double reA, double imA, double reB, double imB, double& reR, double& imR) {
+    reR = reA + reB;
+    imR = imA + imB;
+}
+static void f_csub(double reA, double imA, double reB, double imB, double& reR, double& imR) {
+    reR = reA - reB;
+    imR = imA - imB;
+}
+static void f_cmul(double reA, double imA, double reB, double imB, double& reR, double& imR) {
+    reR = reA * reB - imA * imB;
+    imR = reA * imB + imA * reB;
+}
+static void f_cdiv(double reA, double imA, double reB, double imB, double& reR, double& imR) {
+    double denom = reB * reB + imB * imB;
+    if (denom == 0.0) throw EvalError("div by zero");
+    reR = (reA * reB + imA * imB) / denom;
+    imR = (imA * reB - reA * imB) / denom;
 }
 
 // Result: true if `id` was recognized (and handled), false = unknown token.
@@ -537,6 +622,18 @@ static bool evaluateIdentifier(const std::string& id) {
 
     // 3-arg: f(Z, Y, X)
     if (equalsIgnoreCase(id, "clamp")) { doTernary(f_clamp); return true; }
+
+    // Rectangular/polar conversion: 2-in (Y=x, X=y), 2-out (Y=r, X=theta)
+    // or the reverse.
+    if (equalsIgnoreCase(id, "r2p")) { doConvert2(f_r2p); return true; }
+    if (equalsIgnoreCase(id, "p2r")) { doConvert2(f_p2r); return true; }
+
+    // Complex-pair arithmetic: 4-in (T,Z)=A entered first, (Y,X)=B entered
+    // second, each (real,imag); 2-out (Y,X) = the complex result.
+    if (equalsIgnoreCase(id, "cadd")) { doComplexBinary(f_cadd); return true; }
+    if (equalsIgnoreCase(id, "csub")) { doComplexBinary(f_csub); return true; }
+    if (equalsIgnoreCase(id, "cmul")) { doComplexBinary(f_cmul); return true; }
+    if (equalsIgnoreCase(id, "cdiv")) { doComplexBinary(f_cdiv); return true; }
 
     // STO(n)/RCL(n): numbered memory registers 0-9, independent of the
     // stack -- STO leaves X untouched, RCL pushes like a new number.
@@ -869,6 +966,7 @@ static const std::vector<std::string> FUNCTION_NAMES = {
     "sqrt", "cbrt", "inv", "sq", "pow", "exp", "log", "ln", "log2",
     "abs", "floor", "ceil", "round", "int", "fact",
     "mod", "min", "max", "clamp", "gcd", "lcm", "ncr", "npr",
+    "r2p", "p2r", "cadd", "csub", "cmul", "cdiv",
     "sto", "rcl",
     "help", "save", "time", "timeset", "date", "dateset",
     "usbdrive", "usbdebug", "sleeptime", "wifi", "battery", "uptime",
