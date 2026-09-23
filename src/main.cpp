@@ -121,6 +121,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <cstring>
 #include <CardputerClock.h>
 #include <CardputerUsbDrive.h>
 #include <CardputerSleep.h>
@@ -157,6 +158,12 @@ static double mem[10] = {0.0}; // STO/RCL numbered memory registers, independent
 static std::string resultLine;   // status/error line shown below the stack
 static bool degMode = false;     // false = radians, true = degrees
 
+// How the stack registers are displayed. This is a display setting only:
+// the stored values are always the same doubles, and 0x../0b.. literals
+// can be typed whatever the mode is.
+enum NumBase { BASE_DEC = 0, BASE_HEX = 1, BASE_BIN = 2 };
+static int numBase = BASE_DEC;
+
 // Entry state: what's currently being typed (a number or an identifier),
 // not yet applied to the stack.
 static std::string entryBuf;
@@ -171,13 +178,14 @@ static const std::vector<std::vector<std::string>> helpPages = {
     {"Entering numbers:", "digits/. then Enter", "pushes onto the stack.", "Enter on blank line", "duplicates X.", "opt+- (CHS) = sign"},
     {"Operators (no Enter", "needed):", "+ - * / ^ %  pop Y,X", "push f(Y,X)", "!  factorial of X"},
     {"Scientific notation:", "6.022 e 23 Enter", "  = 6.022e23", "1 e - 6 Enter", "  = 1e-6 ('-' after e", "   is the exponent sign)"},
+    {"Number bases:", "hex / bin / dec change", "how the stack is shown", "(display only, values", "are unchanged)", "type 0x1f or 0b1010 for", "a literal; 32-bit ints"},
     {"Trig & hyperbolic", "(type name + Enter):", "sin cos tan atan2", "(opt+D toggles deg/rad)", "sinh cosh tanh", "asinh acosh atanh"},
     {"Power/log & compare:", "sqrt cbrt inv sq pow", "log ln log2 exp", "min max gcd lcm", "mod clamp"},
     {"Combinatorics & round:", "ncr npr rand randint", "abs floor ceil round", "int  pi  e"},
-    {"Memory registers 0-9:", "sto(n) stores X into", "  register n (X unchanged)", "rcl(n) pushes register n", "ex: 5 Enter sto(0)"},
+    {"Memory registers 0-9:", "sto(n) stores X into", "  register n (X unchanged)", "rcl(n) pushes register n", "ex: 5 Enter sto(0", "closing ) is optional"},
     {"Complex/polar (2 regs =", " one complex number):", "r2p (Y=x,X=y)->(Y=r,X=t)", "p2r is the reverse", "cadd/csub/cmul/cdiv:", "  (T,Z)=A (Y,X)=B ->(Y,X)"},
     {"Stack keys:", "fn+; roll up (Rup)", "fn+. roll down (Rdn)", "fn+S swap X<->Y", "fn+Bksp clear all"},
-    {"Saving:", "Stack auto-saves to", "flash (survives power", "off). save+Enter also", "appends to rpn_log.txt", "on a microSD card."},
+    {"Saving:", "Stack auto-saves to", "flash (survives power", "off). save+Enter also", "appends to rpn_log.txt", "on a microSD card.", "save(a note) labels the", "  block with a comment"},
     {"Clock (no RTC on this", "board, resets each boot):", "timeset(H,M,S) / time", "dateset(Y,M,D) / date", "ex: timeset(9,30,0)"},
     {"USB drive mode:", "usbdrive exposes the SD", "card to a computer over", "USB. Needs reset/power-", "cycle to return.", "usbdebug shows why it", "failed, after a reset."},
     {"Auto-sleep (no PMIC, so", "this is deep sleep):", "sleeptime(n) sets n min", "sleeptime shows current", "G0/BtnA sleeps/wakes;", "wake retries saved wifi"},
@@ -234,9 +242,46 @@ static void swapXY() { std::swap(regX, regY); }
 // ---------------------------------------------------------------------
 // Formatting / parsing helpers
 // ---------------------------------------------------------------------
+// Values that hex/bin display can represent: exact integers inside the
+// 32-bit range, taken as signed or unsigned (-2^31 .. 2^32-1), which is
+// also the range the 0x../0b.. literals accept.
+static bool asInt32(double v, long long& out) {
+    if (!std::isfinite(v)) return false;
+    if (v != std::trunc(v)) return false;
+    if (v < -2147483648.0 || v > 4294967295.0) return false;
+    out = (long long)v;
+    return true;
+}
+
+// Sign-magnitude, like the decimal display: "-0b101" rather than a two's
+// complement pattern, which would need a word size to be meaningful.
+static std::string formatInBase(long long v, int base) {
+    bool neg = v < 0;
+    unsigned long long m = neg ? (unsigned long long)(-v) : (unsigned long long)v;
+    std::string digits;
+    if (base == BASE_HEX) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%llX", m);
+        digits = buf;
+        return (neg ? "-0x" : "0x") + digits;
+    }
+    if (m == 0) {
+        digits = "0";
+    } else {
+        while (m) { digits += (char)('0' + (m & 1ULL)); m >>= 1; }
+        std::reverse(digits.begin(), digits.end());
+    }
+    return (neg ? "-0b" : "0b") + digits;
+}
+
 static std::string formatNumber(double v) {
     if (std::isnan(v)) return "ERR";
     if (std::isinf(v)) return v > 0 ? "inf" : "-inf";
+    long long i;
+    // Out of range or not a whole number: fall back to the decimal form
+    // rather than refusing to show the value. The "0x"/"0b" prefix is what
+    // tells the two apart on screen.
+    if (numBase != BASE_DEC && asInt32(v, i)) return formatInBase(i, numBase);
     char buf[64];
     snprintf(buf, sizeof(buf), "%.10g", v);
     return std::string(buf);
@@ -259,8 +304,44 @@ static bool startsWithIgnoreCase(const std::string& a, const char* prefix) {
     return true;
 }
 
+// "0x1f" / "0b1010", optionally signed by CHS. Parsed here explicitly
+// rather than left to strtod (which takes hex but not binary), so both
+// bases behave the same way and share one range check.
+static int baseDigit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static bool parseBasedLiteral(const std::string& s, double& out) {
+    size_t i = (!s.empty() && s[0] == '-') ? 1 : 0;
+    if (s.size() < i + 3 || s[i] != '0') return false;
+    int base = (s[i + 1] == 'x' || s[i + 1] == 'X') ? 16
+             : (s[i + 1] == 'b' || s[i + 1] == 'B') ? 2 : 0;
+    if (base == 0) return false;
+    unsigned long long m = 0;
+    for (size_t k = i + 2; k < s.size(); k++) {
+        int d = baseDigit(s[k]);
+        if (d < 0 || d >= base) return false;
+        m = m * (unsigned)base + (unsigned)d;
+        if (m > 4294967295ULL) return false; // past 32 bits
+    }
+    out = (i == 1) ? -(double)m : (double)m;
+    return true;
+}
+
+// True for anything that looks like the start of a based literal, so the
+// rest of the entry code can keep its hands off the "e" in "0x1e5".
+static bool isBasedLiteral(const std::string& s) {
+    size_t i = (!s.empty() && s[0] == '-') ? 1 : 0;
+    return s.size() >= i + 2 && s[i] == '0' &&
+           (s[i + 1] == 'x' || s[i + 1] == 'X' || s[i + 1] == 'b' || s[i + 1] == 'B');
+}
+
 static bool parseNumeric(const std::string& s, double& out) {
     if (s.empty() || s == "-" || s == ".") return false;
+    if (isBasedLiteral(s)) return parseBasedLiteral(s, out);
     size_t idx = 0;
     try {
         out = std::stod(s, &idx);
@@ -328,6 +409,7 @@ static CardputerClock clock_;
 static void saveStateToFlash() {
     prefs.begin(PREFS_NS, false);
     prefs.putBool("deg", degMode);
+    prefs.putInt("base", numBase);
     prefs.putDouble("x", regX);
     prefs.putDouble("y", regY);
     prefs.putDouble("z", regZ);
@@ -343,6 +425,7 @@ static void saveStateToFlash() {
 static void loadStateFromFlash() {
     prefs.begin(PREFS_NS, true);
     degMode = prefs.getBool("deg", false);
+    numBase = prefs.getInt("base", BASE_DEC);
     regX = prefs.getDouble("x", 0.0);
     regY = prefs.getDouble("y", 0.0);
     regZ = prefs.getDouble("z", 0.0);
@@ -357,7 +440,9 @@ static void loadStateFromFlash() {
 
 // Appends a snapshot of the current stack to /rpn_log.txt on the SD card
 // as a labeled block, so re-running "save" doesn't overwrite older saves.
-static bool saveStackToSD() {
+// An optional comment (typed as "save(some note)") goes in the block's
+// header line, which is what makes an old block identifiable later.
+static bool saveStackToSD(const std::string& comment) {
     if (!sdReady) return false;
     File f = SD.open(SD_LOG_PATH, FILE_APPEND);
     if (!f) return false;
@@ -374,7 +459,10 @@ static bool saveStackToSD() {
     } else if (clock_.isTimeSet()) {
         tsSuffix = " @ " + clock_.timeString();
     }
-    f.printf("---- save #%u (%s)%s ----\n", (unsigned)saveNum, degMode ? "DEG" : "RAD", tsSuffix.c_str());
+    std::string note;
+    if (!comment.empty()) note = " -- " + comment;
+    f.printf("---- save #%u (%s)%s%s ----\n", (unsigned)saveNum, degMode ? "DEG" : "RAD",
+             tsSuffix.c_str(), note.c_str());
     f.printf("T = %s\n", formatNumber(regT).c_str());
     f.printf("Z = %s\n", formatNumber(regZ).c_str());
     f.printf("Y = %s\n", formatNumber(regY).c_str());
@@ -391,6 +479,16 @@ static bool saveStackToSD() {
 // ---------------------------------------------------------------------
 static bool isIdentifierEntry() {
     return entering && !entryBuf.empty() && std::isalpha((unsigned char)entryBuf[0]);
+}
+
+// True while the cursor sits inside a command's parentheses -- "wifi(my-
+// ssid", "save(a note". What's typed there is literal text, not math, so
+// operator keys and punctuation are ordinary characters (see handleChar()
+// and the key dispatch in loop()).
+static bool inArgEntry() {
+    if (!entering || !isIdentifierEntry()) return false;
+    size_t p = entryBuf.find('(');
+    return p != std::string::npos && p < cursorPos;
 }
 
 static bool finalizeEntryForOperation() {
@@ -677,8 +775,28 @@ static bool evaluateUtilityCommand(const std::string& cmd) {
         return true;
     }
     if (equalsIgnoreCase(cmd, "save")) {
-        bool ok = saveStackToSD();
+        bool ok = saveStackToSD("");
         resultLine = ok ? ("Saved to " + std::string(SD_LOG_PATH)) : "SD ERR (no card?)";
+        return true;
+    }
+    // save(comment): everything up to the final ")" is the comment, commas
+    // included -- it's one free-text argument, not a list.
+    if (startsWithIgnoreCase(cmd, "save(") && !cmd.empty() && cmd.back() == ')') {
+        std::string comment = cmd.substr(5, cmd.size() - 6);
+        size_t a = comment.find_first_not_of(' ');
+        size_t b = comment.find_last_not_of(' ');
+        comment = (a == std::string::npos) ? "" : comment.substr(a, b - a + 1);
+        bool ok = saveStackToSD(comment);
+        resultLine = ok ? ("Saved to " + std::string(SD_LOG_PATH)) : "SD ERR (no card?)";
+        return true;
+    }
+    // Display base. Stored values never change -- only how they're shown.
+    if (equalsIgnoreCase(cmd, "dec") || equalsIgnoreCase(cmd, "hex") || equalsIgnoreCase(cmd, "bin")) {
+        numBase = equalsIgnoreCase(cmd, "hex") ? BASE_HEX
+                : equalsIgnoreCase(cmd, "bin") ? BASE_BIN : BASE_DEC;
+        saveStateToFlash();
+        resultLine = numBase == BASE_HEX ? "Base: HEX (0x)"
+                   : numBase == BASE_BIN ? "Base: BIN (0b)" : "Base: DEC";
         return true;
     }
     if (equalsIgnoreCase(cmd, "time")) {
@@ -817,6 +935,10 @@ static void onEnter() {
 
     if (isIdentifierEntry()) {
         std::string id = entryBuf;
+        // The closing ")" is optional: "sto(0" and "sto(0)" mean the same
+        // thing, since Enter is already the end of the line. Only a
+        // trailing one is ever added, so a mistyped "sto(0))" still errors.
+        if (id.find('(') != std::string::npos && id.back() != ')') id += ')';
         entering = false;
         entryBuf.clear();
         cursorPos = 0;
@@ -865,7 +987,13 @@ static void clearAll() {
 static void handleChar(char c) {
     static const std::string allowed = "0123456789.()!,-_ ";
     bool isFuncLetter = std::isalpha((unsigned char)c);
-    if (allowed.find(c) == std::string::npos && !isFuncLetter) return;
+    if (inArgEntry()) {
+        // A command's argument is free text (an SSID, a log comment), so
+        // anything printable goes in as an ordinary character.
+        if ((unsigned char)c < 0x20 || (unsigned char)c > 0x7E) return;
+    } else if (allowed.find(c) == std::string::npos && !isFuncLetter) {
+        return;
+    }
 
     if (!entering) {
         entering = true;
@@ -931,7 +1059,9 @@ static void handleBackspace() {
 static void handleChs() {
     if (entering) {
         if (isIdentifierEntry()) return; // no sign concept for a function name
-        size_t epos = entryBuf.find_first_of("eE");
+        // In "0x1e5" the "e" is a hex digit, not an exponent marker.
+        size_t epos = isBasedLiteral(entryBuf) ? std::string::npos
+                                               : entryBuf.find_first_of("eE");
         size_t signPos = (epos != std::string::npos) ? epos + 1 : 0;
         if (signPos < entryBuf.size() && entryBuf[signPos] == '-') {
             entryBuf.erase(entryBuf.begin() + signPos);
@@ -968,7 +1098,7 @@ static const std::vector<std::string> FUNCTION_NAMES = {
     "mod", "min", "max", "clamp", "gcd", "lcm", "ncr", "npr",
     "r2p", "p2r", "cadd", "csub", "cmul", "cdiv",
     "sto", "rcl",
-    "help", "save", "time", "timeset", "date", "dateset",
+    "help", "save", "hex", "bin", "dec", "time", "timeset", "date", "dateset",
     "usbdrive", "usbdebug", "sleeptime", "wifi", "battery", "uptime",
 };
 
@@ -1039,10 +1169,14 @@ static void renderUsbDriveScreen() {
     canvas.pushSprite(0, 0);
 }
 
+// 20 characters fit across the display at text size 2. A 32-bit binary
+// value needs up to 35 ("-0b" + 32 digits), so a line that long is drawn
+// in the small font instead of running off the screen.
 static void renderRegisterLine(int y, const char* label, const std::string& text, uint16_t color) {
-    canvas.setTextSize(2);
+    bool small = strlen(label) + text.size() > 20;
+    canvas.setTextSize(small ? 1 : 2);
     canvas.setTextColor(color, TFT_BLACK);
-    canvas.setCursor(2, y);
+    canvas.setCursor(2, small ? y + 5 : y); // keep the small font centred in the line
     canvas.print(label);
     canvas.print(text.c_str());
 }
@@ -1081,7 +1215,8 @@ static void render() {
     canvas.setTextSize(1);
     canvas.setTextColor(TFT_GREEN, TFT_BLACK);
     canvas.setCursor(2, 2);
-    canvas.printf("RPN Calc  [%s]", degMode ? "DEG" : "RAD");
+    canvas.printf("RPN Calc  [%s]%s", degMode ? "DEG" : "RAD",
+                  numBase == BASE_HEX ? "  HEX" : numBase == BASE_BIN ? "  BIN" : "");
 
     int y = TOP_Y;
     renderRegisterLine(y, "T ", formatNumber(regT), TFT_DARKGREY); y += REG_LINE_H;
@@ -1236,7 +1371,10 @@ void loop() {
                 saveStateToFlash();
             } else {
                 for (char c : status.word) {
-                    if (c == '+') { doBinary(f_add); }
+                    // Inside a command's "(...)" every key is literal text,
+                    // so "save(1+2 check)" keeps its "+" instead of adding.
+                    if (inArgEntry()) { handleChar(c); }
+                    else if (c == '+') { doBinary(f_add); }
                     else if (c == '-') { handleMinusKey(); }
                     else if (c == '*') { doBinary(f_mul); }
                     else if (c == '/') { doBinary(f_div); }
