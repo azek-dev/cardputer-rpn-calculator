@@ -74,6 +74,41 @@ Once `e` has been typed, `opt+-` (CHS) flips the **exponent's** sign
 instead of the mantissa's (before `e` is typed, it still flips the
 mantissa's sign as usual).
 
+## Number bases (hex and binary)
+
+Type `hex`, `bin` or `dec` and press Enter to switch how the stack is
+**displayed**. The stored values never change -- this is a display setting
+only. It's saved to internal flash, so it survives a power cycle, and the
+current mode is shown as `HEX` / `BIN` in the top-right corner.
+
+```
+255 Enter          ->  X = 255
+hex Enter          ->  X = 0xFF
+bin Enter          ->  X = 0b11111111
+dec Enter          ->  X = 255
+```
+
+Literals can be typed with a `0x` / `0b` prefix at any time, whatever the
+display mode is.
+
+```
+0x1f Enter         ->  pushes 31
+0b1010 Enter       ->  pushes 10
+0xff 0x0f + Enter  ->  270 (0x10E)
+```
+
+**Range**: only whole numbers that fit in 32 bits are shown in hex or binary
+(signed -2147483648 to 2147483647, or unsigned 0 to 4294967295). Fractions
+and out-of-range values stay in decimal whatever the mode, so a value
+without a `0x` / `0b` prefix is one that couldn't be converted.
+
+**Negative values** are shown sign-magnitude (`-0x10`, `-0b101`) rather than
+as a two's complement pattern, which would need a fixed word size to mean
+anything. `opt+-` (CHS) flips the sign exactly as it does in decimal.
+
+**Width**: a 32-bit binary value is too wide for the large font, so a line
+that long is drawn in the small font automatically.
+
 ## Operators (apply immediately, no Enter needed)
 
 | Key | Action |
@@ -161,6 +196,11 @@ rcl(0)             ->  recalls that 5 back onto the stack
 Memory registers are auto-saved to internal flash too, and survive power
 loss.
 
+**The closing parenthesis is optional.** Enter already ends the line, so
+typing `sto(0` and pressing Enter means the same as `sto(0)`. This applies
+to every command that takes parentheses (`sto(`, `rcl(`, `timeset(`,
+`dateset(`, `wifi(`, `sleeptime(`, `save(`).
+
 ## Complex numbers and polar coordinates (for AC circuit math)
 
 There's no full "complex mode" like a real HP calculator (where every
@@ -232,6 +272,26 @@ Y = 3
 X = 8
 
 ```
+
+**Saving with a comment**: type `save(some note)` and the text goes into the
+block's header line, so you can tell later which calculation a block was.
+
+```
+save(coil L=4.7mH at 60Hz) Enter
+```
+
+```
+---- save #2 (RAD) @ 2026-09-23 14:05 -- coil L=4.7mH at 60Hz ----
+T = 0
+Z = 0
+Y = 3
+X = 8
+
+```
+
+Everything inside the parentheses is free text, so characters that normally
+act as operators (`+`, `*`, `,`) are ordinary characters there. Note that
+the built-in keyboard is ASCII only.
 
 Each `save` **appends** a new block rather than overwriting. If there's no
 SD card, or it fails to initialize, you'll see `SD ERR` and nothing else is
