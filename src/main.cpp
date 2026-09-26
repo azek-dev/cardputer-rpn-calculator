@@ -122,6 +122,7 @@
 #include <string>
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
 #include <CardputerClock.h>
 #include <CardputerUsbDrive.h>
 #include <CardputerSleep.h>
@@ -179,6 +180,7 @@ static const std::vector<std::vector<std::string>> helpPages = {
     {"Operators (no Enter", "needed):", "+ - * / ^ %  pop Y,X", "push f(Y,X)", "!  factorial of X"},
     {"Scientific notation:", "6.022 e 23 Enter", "  = 6.022e23", "1 e - 6 Enter", "  = 1e-6 ('-' after e", "   is the exponent sign)"},
     {"Number bases:", "hex / bin / dec change", "how the stack is shown", "(display only, values", "are unchanged)", "type 0x1f or 0b1010 for", "a literal; 32-bit ints"},
+    {"Bitwise (32-bit word):", "and or xor shl shr take", "  Y,X; not takes X", "results are unsigned", "ex: 0b1100 Enter 0b1010", "     and -> 0b1000", "not 0 -> 0xFFFFFFFF"},
     {"Trig & hyperbolic", "(type name + Enter):", "sin cos tan atan2", "(opt+D toggles deg/rad)", "sinh cosh tanh", "asinh acosh atanh"},
     {"Power/log & compare:", "sqrt cbrt inv sq pow", "log ln log2 exp", "min max gcd lcm", "mod clamp"},
     {"Combinatorics & round:", "ncr npr rand randint", "abs floor ceil round", "int  pi  e"},
@@ -640,6 +642,44 @@ static double f_randint(double lo_, double hi_) {
     return (double)r;
 }
 
+// Bitwise operations on a 32-bit word. The stack holds doubles, so a value
+// only qualifies if it is an exact integer inside the range the 0x../0b..
+// literals already accept; a negative one is read as its two's complement
+// pattern, which is what turns -1 into 0xFFFFFFFF. Results always come back
+// unsigned (0 .. 2^32-1), so `not 0` shows as 0xFFFFFFFF rather than -1.
+static uint32_t asWord32(double v) {
+    long long i;
+    if (!asInt32(v, i)) throw EvalError("not a 32-bit int");
+    return (uint32_t)(i & 0xFFFFFFFFLL);
+}
+
+static double f_bitand(double y, double x) { return (double)(asWord32(y) & asWord32(x)); }
+static double f_bitor(double y, double x)  { return (double)(asWord32(y) | asWord32(x)); }
+static double f_bitxor(double y, double x) { return (double)(asWord32(y) ^ asWord32(x)); }
+static double f_bitnot(double x) { return (double)(uint32_t)(~asWord32(x) & 0xFFFFFFFFu); }
+
+// A shift of 32 or more pushes every bit out of the word, so it gives 0
+// rather than an error (shifting by that much is undefined in C++, hence
+// the explicit early return).
+static unsigned shiftCount(double x) {
+    if (!std::isfinite(x) || x != std::trunc(x)) throw EvalError("bad shift");
+    if (x < 0) throw EvalError("shift < 0");
+    if (x > 32) return 32;
+    return (unsigned)x;
+}
+static double f_shl(double y, double x) {
+    uint32_t w = asWord32(y);
+    unsigned n = shiftCount(x);
+    if (n >= 32) return 0.0;
+    return (double)(uint32_t)(((uint64_t)w << n) & 0xFFFFFFFFULL);
+}
+static double f_shr(double y, double x) {
+    uint32_t w = asWord32(y);
+    unsigned n = shiftCount(x);
+    if (n >= 32) return 0.0;
+    return (double)(w >> n);
+}
+
 // Rectangular/polar conversion (2-in, 2-out; DEG/RAD-aware) and lightweight
 // complex-pair arithmetic (4-in, 2-out) -- see the "Complex numbers and
 // polar coordinates" note near the top of this file for the convention.
@@ -705,6 +745,7 @@ static bool evaluateIdentifier(const std::string& id) {
     if (equalsIgnoreCase(id, "round")) { doUnary(static_cast<double(*)(double)>(std::round)); return true; }
     if (equalsIgnoreCase(id, "int")) { doUnary(static_cast<double(*)(double)>(std::trunc)); return true; }
     if (equalsIgnoreCase(id, "fact")) { doUnary(factorial); return true; }
+    if (equalsIgnoreCase(id, "not")) { doUnary(f_bitnot); return true; }
 
     // 2-arg: f(Y, X)
     if (equalsIgnoreCase(id, "pow")) { doBinary(f_pow); return true; }
@@ -717,6 +758,11 @@ static bool evaluateIdentifier(const std::string& id) {
     if (equalsIgnoreCase(id, "ncr")) { doBinary(nCr); return true; }
     if (equalsIgnoreCase(id, "npr")) { doBinary(nPr); return true; }
     if (equalsIgnoreCase(id, "randint")) { doBinary(f_randint); return true; }
+    if (equalsIgnoreCase(id, "and")) { doBinary(f_bitand); return true; }
+    if (equalsIgnoreCase(id, "or")) { doBinary(f_bitor); return true; }
+    if (equalsIgnoreCase(id, "xor")) { doBinary(f_bitxor); return true; }
+    if (equalsIgnoreCase(id, "shl")) { doBinary(f_shl); return true; }
+    if (equalsIgnoreCase(id, "shr")) { doBinary(f_shr); return true; }
 
     // 3-arg: f(Z, Y, X)
     if (equalsIgnoreCase(id, "clamp")) { doTernary(f_clamp); return true; }
@@ -1096,6 +1142,7 @@ static const std::vector<std::string> FUNCTION_NAMES = {
     "sqrt", "cbrt", "inv", "sq", "pow", "exp", "log", "ln", "log2",
     "abs", "floor", "ceil", "round", "int", "fact",
     "mod", "min", "max", "clamp", "gcd", "lcm", "ncr", "npr",
+    "and", "or", "not", "xor", "shl", "shr",
     "r2p", "p2r", "cadd", "csub", "cmul", "cdiv",
     "sto", "rcl",
     "help", "save", "hex", "bin", "dec", "time", "timeset", "date", "dateset",

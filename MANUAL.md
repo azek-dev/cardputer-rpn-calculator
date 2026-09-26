@@ -109,6 +109,47 @@ anything. `opt+-` (CHS) flips the sign exactly as it does in decimal.
 **Width**: a 32-bit binary value is too wide for the large font, so a line
 that long is drawn in the small font automatically.
 
+## Bitwise and logical operations
+
+`and`, `or`, `xor`, `shl` and `shr` consume Y and X and leave the result in
+X; `not` uses X alone. All of them work on a **32-bit word**.
+
+```
+0b1100 Enter 0b1010 Enter and    ->  0b1000  (12 and 10 = 8)
+0b1100 Enter 0b1010 Enter or     ->  0b1110
+0b1100 Enter 0b1010 Enter xor    ->  0b110
+0xF0 Enter not                   ->  0xFFFFFF0F
+1 Enter 8 Enter shl              ->  256   (1 shifted left 8 bits)
+0x100 Enter 8 Enter shr          ->  1     (shifted right 8 bits)
+```
+
+Switching to `hex` or `bin` first makes the results much easier to read.
+
+**Range**: the same as the base display -- whole numbers that fit in 32
+bits. A fraction or an out-of-range value gives `ERR: not a 32-bit int`.
+
+**Negative values** are read as their 32-bit two's complement pattern, so
+`-1` is the all-ones word `0xFFFFFFFF` and `-1 Enter 255 Enter and` gives
+`255`.
+
+**Results are always unsigned** (0 to 4294967295), which is why `not 0` is
+`0xFFFFFFFF` (4294967295 in decimal) rather than `-1`.
+
+**Shift counts** are whole numbers of 0 or more. A count of 32 or more
+pushes every bit out of the word, giving 0. `shr` is a logical shift -- it
+does not preserve a sign bit.
+
+**As boolean logic**: with 0 for false and 1 for true, `and`, `or` and `xor`
+are truth tables as they stand. `not`, however, inverts the whole 32-bit
+word, so use `1 xor` rather than `not` to flip a 0/1 value.
+
+```
+1 Enter 1 Enter and   ->  1        (true and true)
+1 Enter 0 Enter and   ->  0
+1 Enter 1 Enter xor   ->  0        (1 inverted)
+0 Enter 1 Enter xor   ->  1        (0 inverted)
+```
+
 ## Operators (apply immediately, no Enter needed)
 
 | Key | Action |
@@ -405,6 +446,17 @@ function name.
 | `gcd` | Greatest common divisor | `12 Enter 18 Enter gcd` | `6` |
 | `lcm` | Least common multiple | `4 Enter 6 Enter lcm` | `12` |
 | `mod` | Mathematical modulo (sign follows X, the divisor -- unlike `%`) | `7 opt+- Enter 3 Enter mod` | `2` |
+
+### Bitwise (on a 32-bit word)
+
+| Function | Description | Call sequence | Result |
+|---|---|---|---|
+| `and` | Bitwise AND of Y and X | `0b1100 Enter 0b1010 Enter and` | `0b1000` |
+| `or` | Bitwise OR of Y and X | `0b1100 Enter 0b1010 Enter or` | `0b1110` |
+| `xor` | Bitwise XOR of Y and X | `0b1100 Enter 0b1010 Enter xor` | `0b110` |
+| `not` | All bits of X inverted (uses X only) | `0 Enter not` | `0xFFFFFFFF` |
+| `shl` | Y shifted left by X bits | `1 Enter 8 Enter shl` | `256` |
+| `shr` | Y shifted right by X bits (logical) | `0x100 Enter 8 Enter shr` | `1` |
 
 ### Combinatorics and random numbers
 
