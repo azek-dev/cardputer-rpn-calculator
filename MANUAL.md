@@ -390,6 +390,16 @@ entirely opt-in.
 
 - `battery` — battery level (%) and voltage, e.g. `battery: 82% (4.05V)`.
   There's no dedicated fuel-gauge chip, so this is an estimate.
+- `BATT LOW` — once the voltage falls below 3.1 V, a red `BATT LOW` appears
+  next to the title at the top of the screen. **It only warns; the
+  calculator never shuts itself down or goes to sleep because of it.** The
+  voltage is read straight off the ADC, sags under load and moves by tens
+  of millivolts between samples, so the warning appears only after three
+  consecutive five-second readings below 3.1 V, and clears only above
+  3.25 V (the gap keeps it from flickering around the threshold). While USB
+  is connected the ADC sees the charger's voltage, so the warning normally
+  stays off. When it does appear, charge the device soon: 3.0 V is the LiPo
+  discharge floor, and repeatedly going below it degrades the cell.
 - `uptime` — time since the last boot or wake from sleep, e.g. `2d
   03:12:45`.
 
