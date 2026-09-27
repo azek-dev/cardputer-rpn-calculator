@@ -114,6 +114,8 @@
 #include <M5Cardputer.h>
 #include <M5GFX.h>
 #include <esp_random.h>
+#include <esp_ota_ops.h>
+#include <esp_system.h>
 #include <Preferences.h>
 #include <SPI.h>
 #include <SD.h>
@@ -192,6 +194,7 @@ static const std::vector<std::vector<std::string>> helpPages = {
     {"USB drive mode:", "usbdrive exposes the SD", "card to a computer over", "USB. Needs reset/power-", "cycle to return.", "usbdebug shows why it", "failed, after a reset."},
     {"Auto-sleep (no PMIC, so", "this is deep sleep):", "sleeptime(n) sets n min", "sleeptime shows current", "G0/BtnA sleeps/wakes;", "wake retries saved wifi"},
     {"Wifi time sync (opt-in,", "never asked automatically):", "wifi(ssid,pass) saves +", "syncs via NTP (JST)", "wifi() retries saved creds"},
+    {"Two calculators, one", "device (both live on the", "board, one per app slot):", "switch reboots into the", "  algebraic calculator;", "  it has a switch back", "Stack/history kept apart;", "  wifi+sleeptime shared"},
     {"Battery & uptime:", "battery = level %/volts", "uptime = time since last", "  boot/wake"},
 };
 
@@ -201,6 +204,48 @@ static const size_t MAX_ENTRY_LEN = 100;
 // CardputerSleep library -- see cardputer-common.
 static const int WAKE_BUTTON_PIN = 0; // G0 / BtnA, the side button
 static CardputerSleep sleepMgr;
+
+// ---------------------------------------------------------------------
+// switch: reboot into the other calculator
+// ---------------------------------------------------------------------
+// The board's default 8MB partition table already carries two 3.19MB app
+// slots for OTA (app0 at 0x10000, app1 at 0x340000), and each calculator
+// firmware is only about 1.06MB, so both the RPN and the algebraic
+// calculator fit on the device at once, one per slot. `switch` flips which
+// slot the bootloader starts and reboots, which takes about a second --
+// cheaper than reflashing every time you want the other one. An app image
+// runs from either slot unchanged (that is what makes OTA work at all), so
+// the same firmware.bin is what goes into both.
+//
+// Only the boot choice is touched here; nothing is written to the other
+// slot. Each calculator keeps its own NVS namespace ("rpn" / "calc"), so
+// the stack and history of each survive the trip, while cardputer-common's
+// "cpwifi" and "cpsleep" are shared and carry across both.
+static void render(); // defined further down; called just before rebooting
+
+// Why `switch` can't run, or "" when it can. Kept separate from the command
+// itself, and from the ESP-IDF calls, so the decision is testable on a host.
+static std::string switchBlockedReason(const esp_partition_t* running,
+                                       const esp_partition_t* other,
+                                       bool otherHasApp) {
+    if (!running) return "cannot read app slots";
+    // A single-app-partition table has no second slot to go to, and
+    // esp_ota_get_next_update_partition() then hands back the running one.
+    if (!other || other == running) return "no second app slot";
+    // Refuse rather than leave a device that can't boot: an empty slot is
+    // what you get when only one calculator has been flashed.
+    if (!otherHasApp) return "other slot is empty";
+    return "";
+}
+
+// True when something with a valid image header and app descriptor was
+// actually flashed to `p` -- a slot erased to 0xFF, or holding garbage, is
+// rejected by esp_ota_get_partition_description().
+static bool partitionHasApp(const esp_partition_t* p) {
+    if (!p) return false;
+    esp_app_desc_t desc;
+    return esp_ota_get_partition_description(p, &desc) == ESP_OK;
+}
 
 class EvalError : public std::exception {
 public:
@@ -953,6 +998,24 @@ static bool evaluateUtilityCommand(const std::string& cmd) {
         resultLine = buf;
         return true;
     }
+    if (equalsIgnoreCase(cmd, "switch")) {
+        const esp_partition_t* running = esp_ota_get_running_partition();
+        const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
+        std::string why = switchBlockedReason(running, other, partitionHasApp(other));
+        if (why.empty() && esp_ota_set_boot_partition(other) != ESP_OK) {
+            why = "could not switch slots";
+        }
+        if (!why.empty()) {
+            resultLine = "ERR: " + why;
+            return true;
+        }
+        saveStateToFlash(); // the stack is here again next time this slot boots
+        resultLine = "switching, rebooting...";
+        render();
+        delay(700);    // let the message actually reach the screen
+        esp_restart(); // never returns
+        return true;
+    }
     if (equalsIgnoreCase(cmd, "uptime")) {
         uint32_t totalSeconds = millis() / 1000;
         uint32_t days = totalSeconds / 86400;
@@ -1147,6 +1210,7 @@ static const std::vector<std::string> FUNCTION_NAMES = {
     "sto", "rcl",
     "help", "save", "hex", "bin", "dec", "time", "timeset", "date", "dateset",
     "usbdrive", "usbdebug", "sleeptime", "wifi", "battery", "uptime",
+    "switch",
 };
 
 static bool isBareWord(const std::string& w) {
