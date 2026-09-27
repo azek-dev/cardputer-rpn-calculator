@@ -31,6 +31,9 @@ HP電卓のような X/Y/Z/T の4段スタックを常時画面に表示し、�
   `save(コメント)` と書くと、そのコメントが保存ブロックの見出しに入る
 - Wi-Fi/NTP時刻同期、USBマスストレージ(SDカード共有)、アイドルタイムアウト式ディープスリープ
   ([cardputer-common](https://github.com/azek-dev/cardputer-common) 共有ライブラリを使用)
+- `switch` — [代数式電卓](https://github.com/azek-dev/cardputer-adv-calculator)で再起動。
+  8MBフラッシュのアプリ領域が2つあるので両方の電卓を本体に入れておけ、焼き直さずに
+  行き来できる(詳細は [INSTALL.ja.md](INSTALL.ja.md))
 - バッテリー電圧が3.1Vを下回るとタイトル行に赤い `BATT LOW` を表示(警告のみで、
   不正確な電圧を根拠に電卓を止めることはしない)
 - `help` コマンドで画面上のキー・関数リファレンスを表示
