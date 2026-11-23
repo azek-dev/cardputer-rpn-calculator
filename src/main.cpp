@@ -128,8 +128,30 @@
 #include <CardputerClock.h>
 #include <CardputerUsbDrive.h>
 #include <CardputerSleep.h>
+#include "ExtDisplay.h"
 
 static M5Canvas canvas(&M5Cardputer.Display);
+
+// Clip-on expansion screen on the EXT header (see ExtDisplay.h). Every frame
+// drawn on the built-in display is mirrored onto it, scaled up 4/3 and
+// centred (240x135 -> 320x180, black bands top and bottom).
+static ext_display::ExtLCD extLcd;
+static bool extReady = false;
+static const int EXT_ROTATION = 3; // upright when the screen stands behind the keyboard
+static const float EXT_ZOOM = 4.0f / 3.0f;
+
+static void extBlank() {
+    if (extReady) extLcd.fillScreen(TFT_BLACK);
+}
+
+// Push the finished canvas to the built-in display and mirror it outside.
+static void pushCanvas() {
+    canvas.pushSprite(0, 0);
+    if (extReady) {
+        canvas.pushRotateZoomWithAA(&extLcd, extLcd.width() / 2.0f, extLcd.height() / 2.0f,
+                                    0.0f, EXT_ZOOM, EXT_ZOOM);
+    }
+}
 static const int LINE_H = 12;    // px per text line at text size 1
 static const int REG_LINE_H = 22; // px per register line at text size 2
 static const int TOP_Y = 16;      // first register line's y (below the title)
@@ -989,6 +1011,7 @@ static bool evaluateUtilityCommand(const std::string& cmd) {
     }
     if (equalsIgnoreCase(cmd, "usbdrive")) {
         usbDrive.setSdInfo(sdReady, sdSectorCount);
+        extBlank(); // the SD card is about to belong to the USB host alone
         if (!usbDrive.enter()) {
             resultLine = "SD ERR (no card?)";
         }
@@ -1362,7 +1385,7 @@ static void render() {
         canvas.setCursor(2, h - LINE_H - 2);
         canvas.print("fn+;/. page   Enter/BkSp exit");
 
-        canvas.pushSprite(0, 0);
+        pushCanvas();
         return;
     }
 
@@ -1396,7 +1419,7 @@ static void render() {
     canvas.setCursor(2, y + 2);
     canvas.print(resultLine.c_str());
 
-    canvas.pushSprite(0, 0);
+    pushCanvas();
 }
 
 // ---------------------------------------------------------------------
@@ -1404,6 +1427,14 @@ static void render() {
 // ---------------------------------------------------------------------
 static bool wordHas(const Keyboard_Class::KeysState& s, char c) {
     return std::find(s.word.begin(), s.word.end(), c) != s.word.end();
+}
+
+// The expansion screen's backlight runs straight off 5VOUT, so the best we
+// can do before deep sleep is leave it showing black rather than a frozen
+// calculator.
+static void beforeSleep() {
+    saveStateToFlash();
+    extBlank();
 }
 
 void setup() {
@@ -1428,6 +1459,15 @@ void setup() {
     usbDrive.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN,
                    "RpnCard", "Cardputer", "1.0", "CardputerRpn", "SD Card");
 
+    // Expansion screen: brought up after the SD card so both share the SPI
+    // bus (the panel driver re-applies its own bus settings per transfer).
+    // With nothing plugged in the writes simply go nowhere.
+    extReady = extLcd.init();
+    if (extReady) {
+        extLcd.setRotation(EXT_ROTATION);
+        extLcd.fillScreen(TFT_BLACK);
+    }
+
     // Only right after waking from deep sleep via the G0 button -- never on
     // a plain power-on -- silently retry a saved Wi-Fi sync, since that's
     // exactly when the software clock has just been wiped.
@@ -1436,7 +1476,7 @@ void setup() {
         canvas.setTextColor(TFT_YELLOW, TFT_BLACK);
         canvas.setCursor(2, 2);
         canvas.print("Syncing time via Wi-Fi...");
-        canvas.pushSprite(0, 0);
+        pushCanvas();
         clock_.wifiRetry(); // best-effort; failure just leaves the clock unset
     }
 
@@ -1456,13 +1496,13 @@ void loop() {
     }
 
     if (sleepMgr.idleTimeoutReached()) {
-        sleepMgr.enterDeepSleep(saveStateToFlash); // never returns
+        sleepMgr.enterDeepSleep(beforeSleep); // never returns
     }
 
     // G0/BtnA also works as an immediate manual sleep button, not just as
     // the wake source: press it any time to skip the idle timeout.
     if (sleepMgr.buttonPressedEdge()) {
-        sleepMgr.enterDeepSleep(saveStateToFlash); // never returns
+        sleepMgr.enterDeepSleep(beforeSleep); // never returns
     }
 
     M5Cardputer.update();
